@@ -14,11 +14,23 @@ class bcolors:
         self.FAIL = ''
         self.ENDC = ''
 
-    def color_message(self, color, message, end_line=True):
+    def _color_message(self, color, message, end_line=True):
         if end_line:
             print color + str(message) + self.ENDC
         else:
             print color + str(message),
+
+    def warning(self, message, **kwargs):
+        self._color_message(self.WARNING, message, **kwargs)
+
+    def error(self, message, **kwargs):
+        self._color_message(self.FAIL, message, **kwargs)
+
+    def green(self, message, **kwargs):
+        self._color_message(self.OKGREEN, message, **kwargs)
+
+    def blue(self, message, **kwargs):
+        self._color_message(self.OKBLUE, message, **kwargs)
 
 
 
@@ -27,24 +39,157 @@ class Tracker():
             verbose=True, debug=False,
             calibration_patience=int(1e3)
         ):
-        self.verbose = verbose
-        self.debugging = debug
         self.logger = bcolors()
 
+        ''' instantiate state represetation as invalid '''
+        self.state = 'U'
+        self.calibration_snapshot = None
+        self.current_snapshot = None
+
+        ''' config '''
         self.tracker_size = tracker_size
 
-        ''' instantiate state represetation as invalid '''
-        self.calibration_state = None
-        self.current_state = None
+        self.verbose = verbose
+        self.debugging = debug
+        self.calibration_patience = calibration_patience
 
         '''  '''
         self.ask_counter = 0
-        self.calibration_patience = calibration_patience
 
-    def calibrated(self):
-        return not (self.calibration_state is None)
+    """ Actions """
+    def calibrate(self, sources):
+        """ Assumptions:
+        - sources is a valid snapshot
 
-    def valid_state(self, sources):
+        Wrapper for building calibration_snapshot from scratch
+        Also updates current_snapshot since this is a system recovery
+        """
+        self.state = 'W'
+        self.calibration_snapshot = self.state_dict(sources)
+        self.current_snapshot = self.calibration_snapshot
+
+    def start_shoot(self):
+        self.logger.green("Shoot started")
+        self.state = 'S'
+
+    def end_shoot(self):
+        self.logger.green("Shoot ended")
+        self.state = 'W'
+
+    def lose_track(self):
+        if self.verbose:
+            self.logger.error("Lost track!")
+
+        self.state = 'U'
+        self.calibration_snapshot = None
+        self.ask_counter = 0
+
+    def track_sources(self, sources):
+        """ Assumptions:
+        - instance is calibrated
+        - sources is a valid snapshot
+        - outlier removal was done (otherwise tracking is impossible)
+
+        Returns a current_snapshot update
+        """
+
+        if self.debugging:
+            assert self.calibrated()
+            assert self.current_snapshot is not None
+            assert len(sources) == self.tracker_size
+
+        try:
+            tracked = {}
+            for i, s in enumerate(sources):
+                """ builds a list of (point_id, distance) so
+                we can compute the match source to its closest point """
+                t = list(map(
+                    lambda (k,v): (k,
+                        (s['pos'][0]-v['pos'][0])**2 +
+                        (s['pos'][1]-v['pos'][1])**2),
+                    self.current_snapshot.items()
+                ))
+
+                t = sorted(t, key = lambda x: x[1])
+
+                best = t[0][0]
+
+                if tracked.has_key(best):
+                    """  any outlier removal should have been done already ;
+                        tracking is a bijection """
+                    raise ValueError
+                else:
+                    if self.debugging:
+                        self.logger.blue("Matching point %d-th point %s to %s" % (i, str(s), best))
+                    tracked[best] = s
+
+            if self.debugging:
+                """ the logic should never allow the assert below to fail """
+                try:
+                    assert len(tracked) == self.tracker_size
+                except:
+                    print "Sources: ", sources
+                    self.logger.error("Failed trying to match %d-th point (%s) to %s but \
+                        its value is %s" % (i, str(s), best, tracked[best]))
+                    exit()
+
+            return tracked
+
+        except ValueError:
+            """ could not associate
+            since we have a valid detection, calibrate
+            """
+            self.logger.green("Recalibrating")
+            self.calibrate(sources)
+            return self.current_snapshot
+
+    """ Interface """
+    def receive(self, sources, time):
+        """
+        [ DEVELOPMENT
+            ok this fucking needs a refactor haHAA
+            nasty flow control
+        ]
+        """
+        sources = list(filter(lambda x: x is not None, sources))
+        valid = self.valid_snapshot(sources)
+        shooting = self.performing_shoot(sources) if valid else False
+        touching_puck = self.starting_shoot(sources) if valid and not shooting else False
+
+        """ shoot detection """
+        if self.state == 'S' and not shooting:
+            self.end_shoot()
+
+        elif self.state == 'W' and (touching_puck or shooting):
+            self.start_shoot()
+
+        """ tracking """
+        if self.state == 'U':
+            if valid:
+                self.logger.green("Calibrating")
+                self.calibrate(sources)
+            else:
+                if self.ask_counter == 0:
+                    self.logger.warning("Waiting for calibration trigger")
+                self.ask_counter = (self.ask_counter + 1) % self.calibration_patience
+
+        else:
+            if valid:
+                fit_sources = self.outlier_removal(sources)
+                self.current_snapshot = self.track_sources(fit_sources)
+            else:
+                self.lose_track()
+                self.current_snapshot = None
+
+
+        """ stdout logging """
+        if self.verbose:
+            self.log(sources, time)
+            if self.current_snapshot:
+                print "[%s]: %s" % (self.state, self.current_snapshot)
+
+    """ Internal Methods """
+    def valid_snapshot(self, sources):
         """
         Tells if the tracker should attempt to
             calibrate or keep tracking the detected sources
@@ -53,12 +198,40 @@ class Tracker():
         """
         return len(sources) >= self.tracker_size
 
+
+    def starting_shoot(self, sources):
+        """
+        Assumptions:
+        - source is a valid snapshot
+
+        Tells if lowest stick point is touching virtual puck location
+        """
+        #print "Raw sources", sources
+        sources.sort(key=lambda x: x['pos'][1])
+        print "Ordered sources", sources
+
+        condition = sources[0]['pos'][1] < 300
+        print "Condition: ", condition
+
+        return condition
+
+    def performing_shoot(self, sources):
+        """
+        Assumptions:
+        - source is a valid snapshot
+        - current tracker state is Shooting
+
+        Tells if shoot is still being performed
+        """
+
+        return self.starting_shoot(sources)
+
     def outlier_removal(self, sources):
         return sources[:self.tracker_size]
 
     def state_dict(self, sources):
         """ Assumptions:
-        - sources is a valid state
+        - sources is a valid snapshot
 
         Behavior:
             Builds a dictionary so any tracked point is identified
@@ -90,123 +263,12 @@ class Tracker():
         """
         return { i:v for (i,v) in enumerate(self.outlier_removal(sources)) }
 
-    def calibrate(self, sources):
-        """ Assumptions:
-        - sources is a valid state
-
-        Wrapper for building calibration_state from scratch
-        Also updates current_state since this is a system recovery
-        """
-        self.calibration_state = self.state_dict(sources)
-        self.current_state = self.calibration_state
-
-    def lose_track(self):
-        if self.verbose:
-            self.logger.color_message(bcolors.FAIL, "Lost track!")
-        self.calibration_state = None
-        self.ask_counter = 0
-
-    def track_sources(self, sources):
-        """ Assumptions:
-        - instance is calibrated
-        - sources is a valid state
-        - outlier removal was done (otherwise tracking is impossible)
-
-        Returns a current_state update
-        """
-
-        if self.debugging:
-            assert self.calibrated()
-            assert self.current_state is not None
-            assert len(sources) == self.tracker_size
-
-        try:
-            tracked = {}
-            for i, s in enumerate(sources):
-                """ builds a list of (point_id, distance) so
-                we can compute the match source to its closest point """
-                t = list(map(
-                    lambda (k,v): (k,
-                        (s['pos'][0]-v['pos'][0])**2 +
-                        (s['pos'][1]-v['pos'][1])**2),
-                    self.current_state.items()
-                ))
-
-                t = sorted(t, key = lambda x: x[1])
-
-                best = t[0][0]
-
-                if tracked.has_key(best):
-                    """  any outlier removal should have been done already ;
-                        tracking is a bijection """
-                    raise ValueError
-                else:
-                    if self.debugging:
-                        self.logger.color_message(bcolors.OKBLUE, "Matching point %d-th point %s to %s" % (i, str(s), best))
-                    tracked[best] = s
-
-            if self.debugging:
-                """ the logic should never allow the assert below to fail """
-                try:
-                    assert len(tracked) == self.tracker_size
-                except:
-                    print "Sources: ", sources
-                    self.logger.color_message(bcolors.FAIL, ("Failed trying to match %d-th point (%s) to %s but \
-                        its value is %s" % (i, str(s), best, tracked[best])))
-                    exit()
-
-            return tracked
-
-        except ValueError:
-            """ could not associate
-            since we have a valid detection, calibrate
-            """
-            self.logger.color_message(bcolors.OKGREEN, "Recalibrating")
-            self.calibrate(sources)
-            return self.current_state
-
     def log(self, sources, time):
         valid_src = False
         for src in sources:
             if src:
                 valid_src = True
-                self.logger.color_message(bcolors.OKBLUE, str(src['pos']), end_line=False)
+                self.logger.blue(str(src['pos']), end_line=False)
 
         if valid_src:
             print '' + bcolors.ENDC
-
-
-    def receive(self, sources, time):
-        """
-        [ DEVELOPMENT
-            ok this fucking needs a refactor haHAA
-            nasty flow control
-        ]
-        """
-        sources = list(filter(lambda x: x is not None, sources))
-        valid = self.valid_state(sources)
-
-        if self.verbose:
-            self.log(sources, time)
-            if self.current_state:
-                print self.current_state
-
-
-        if not valid:
-            if not self.calibrated():
-                if self.ask_counter == 0:
-                    self.logger.color_message(bcolors.WARNING, "Waiting for calibration trigger")
-                self.ask_counter = (self.ask_counter + 1) % self.calibration_patience
-
-            else:
-                self.lose_track()
-                self.current_state = None
-        else:
-            if not self.calibrated():
-                self.logger.color_message(bcolors.OKGREEN, "Calibrating")
-
-                self.calibrate(sources)
-            else:
-                self.current_state = self.track_sources(
-                    self.outlier_removal(sources)
-                )
