@@ -43,6 +43,7 @@ class Tracker():
 
         ''' instantiate state represetation as invalid '''
         self.state = 'U'
+        self.current_sources = []
         self.calibration_snapshot = None
         self.current_snapshot = None
 
@@ -155,6 +156,8 @@ class Tracker():
         valid = self.valid_snapshot(sources)
         shooting = self.performing_shoot(sources) if valid else False
         touching_puck = self.starting_shoot(sources) if valid and not shooting else False
+
+        self.current_sources = sources
 
         """ shoot detection """
         if self.state == 'S' and not shooting:
