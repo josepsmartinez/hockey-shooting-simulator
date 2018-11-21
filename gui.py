@@ -1,11 +1,18 @@
 from __future__ import absolute_import
 
 import sys
+from datetime import datetime
 
 import pygame
-import OpenGL.GL as gl
+from OpenGL.GLUT import *
+from OpenGL.GL import *
+from OpenGL.GLU import *
 from imgui.integrations.pygame import PygameRenderer
 import imgui
+from imgui_datascience import imgui_cv
+
+import cv2
+import numpy as np
 
 from capture import get_wiimote, high_callback
 wiimote = None
@@ -13,16 +20,60 @@ wiimote = None
 from tracker import Tracker
 
 __CONFIG = {
+    'WINDOW_SIZE': (800, 600),
+
     'LEDS_ON_STICK': 4,
-    'PUCK_POSITION': (0,0)
+    'PUCK_POSITION': (0, 0)
 }
 
-def main_loop(renderer):
+GUI_STATE = 'init'
+
+def no_controller_screen():
+    global GUI_STATE
+
+    imgui.text("No wiimote detected")
+
+    if imgui.button("Connect"):
+        GUI_STATE = 'connection'
+
+def connection_screen(tracker):
     global wiimote
-    cfg = __CONFIG
-    tracker = Tracker(cfg['LEDS_ON_STICK'])
+    global GUI_STATE
+
+    imgui.text("---- CONNECTION INSTRUCTIONS ----")
+
+    GUI_STATE = 'connecting'
+
+
+def main_screen(tracker):
+    global wiimote
+    global GUI_STATE
+
+    imgui.text("---- IR DATA (at least) ----")
+    imgui.text("[%s] -> %s" % (tracker.state, tracker.current_sources))
+    imgui.text("%s" % datetime.utcnow())
+
+
+    img = np.zeros((1024, 1024), np.uint8)
+    img += 255
+
+    for source in tracker.current_sources:
+        img = cv2.circle(img, source['pos'], 10*source['size'], (0.5,0.5,0.5), -1)
+
+    imgui_cv.image(img, height=150, title="Detected IR sources")
+
+
+def clear_screen():
+    glClearColor(0.0, 0.0, 0.0, 0.0)
+    glClear(GL_COLOR_BUFFER_BIT)
+    #glEnd()
+
+def main_loop(tracker, renderer):
+    global wiimote
+    global GUI_STATE
 
     io = imgui.get_io()
+
 
     for event in pygame.event.get():
         """ these events could turn this loop function into an 'infinite' iterator
@@ -31,6 +82,7 @@ def main_loop(renderer):
             sys.exit()
 
         renderer.process_event(event)
+
 
     # start new frame context
     imgui.new_frame()
@@ -41,37 +93,39 @@ def main_loop(renderer):
     imgui.begin("Main", False,
         flags=imgui.WINDOW_NO_MOVE+imgui.WINDOW_NO_TITLE_BAR)
 
-    # draw text label inside of current window
-    if wiimote is None:
-        imgui.text("Nao tem wii!!")
+    # draw screen based on interface state
+    {
+        'init': lambda: no_controller_screen(),
+        'connection': lambda: connection_screen(tracker),
+        'active': lambda: main_screen(tracker)
 
-        if imgui.button("Pegar wii"):
-            while wiimote is None:
-                wiimote = get_wiimote()
-
-            wiimote.mesg_callback = high_callback(lambda mesg, time: tracker.receive(mesg[1], time))
-    else:
-        imgui.text("Achei um wii!!")
-
-
+    }[GUI_STATE]()
 
 
     # close current window context
     imgui.end()
 
-    # refills background and renders
-    background_color = (0,0,1)
-    gl.glClearColor(*(background_color + tuple([1])))
-    gl.glClear(gl.GL_COLOR_BUFFER_BIT)
-    imgui.render()
 
+    # refills background and renders
+    clear_screen()
+
+    imgui.render()
     pygame.display.flip()
 
+    # handles wiimote connection after rendering instructions
+    if GUI_STATE == 'connecting':
+        while wiimote is None:
+            wiimote = get_wiimote() # hangs interface
+        wiimote.mesg_callback = high_callback(lambda mesg, time: tracker.receive(mesg[1], time))
+
+        GUI_STATE = 'active'
+
 def main():
+    cfg = __CONFIG
+    tracker = Tracker(cfg['LEDS_ON_STICK'])
+    size = cfg['WINDOW_SIZE']
+
     pygame.init()
-
-    size = 800, 600
-
     pygame.display.set_mode(size, pygame.DOUBLEBUF | pygame.OPENGL)
 
     io = imgui.get_io()
@@ -81,7 +135,7 @@ def main():
     renderer = PygameRenderer()
 
     while 1:
-        main_loop(renderer)
+        main_loop(tracker, renderer)
 
 if __name__ == '__main__':
     main()
