@@ -14,16 +14,18 @@ from imgui_datascience import imgui_cv
 import cv2
 import numpy as np
 
+import cwiid
+
 from capture import get_wiimote, high_callback
 wiimote = None
 
 from tracker import Tracker
 
 __CONFIG = {
-    'WINDOW_SIZE': (800, 600),
+    'WINDOW_SIZE': tuple(map(lambda x: int(x*1.5), (800, 600))),
 
     'LEDS_ON_STICK': 4,
-    'PUCK_POSITION': (0, 0)
+    'PUCK_POSITION': tuple(map(int, (cwiid.IR_X_MAX*0.5, cwiid.IR_Y_MAX*0.9)))
 }
 
 GUI_STATE = 'init'
@@ -49,18 +51,24 @@ def main_screen(tracker):
     global wiimote
     global GUI_STATE
 
+    io = imgui.get_io()
+
+    ''' IR data background '''
+    img = np.zeros((cwiid.IR_Y_MAX, cwiid.IR_X_MAX), np.uint8)
+    img += 255
+
+    ''' draw detected sources '''
+    for source in tracker.current_sources:
+        img = cv2.circle(img, source['pos'], 10*source['size'], (0.5,0.5,0.5), -1)
+
+    ''' draw puck position '''
+    img = cv2.circle(img, tracker.puck_position, 10, (0,255,255), -1)
+
     imgui.text("---- IR DATA (at least) ----")
     imgui.text("[%s] -> %s" % (tracker.state, tracker.current_sources))
     imgui.text("%s" % datetime.utcnow())
 
-
-    img = np.zeros((1024, 1024), np.uint8)
-    img += 255
-
-    for source in tracker.current_sources:
-        img = cv2.circle(img, source['pos'], 10*source['size'], (0.5,0.5,0.5), -1)
-
-    imgui_cv.image(img, height=150, title="Detected IR sources")
+    imgui_cv.image(img, height=int(0.6*io.display_size[1]), title="Detected IR sources")
 
 
 def clear_screen():
@@ -98,7 +106,6 @@ def main_loop(tracker, renderer):
         'init': lambda: no_controller_screen(),
         'connection': lambda: connection_screen(tracker),
         'active': lambda: main_screen(tracker)
-
     }[GUI_STATE]()
 
 
@@ -122,7 +129,7 @@ def main_loop(tracker, renderer):
 
 def main():
     cfg = __CONFIG
-    tracker = Tracker(cfg['LEDS_ON_STICK'])
+    tracker = Tracker(cfg['LEDS_ON_STICK'], cfg['PUCK_POSITION'])
     size = cfg['WINDOW_SIZE']
 
     pygame.init()
