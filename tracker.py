@@ -36,6 +36,7 @@ class bcolors:
 
 class Tracker():
     def __init__(self, tracker_size,
+            puck_position, puck_proximity=10,
             verbose=True, debug=False,
             calibration_patience=int(1e3)
         ):
@@ -49,6 +50,8 @@ class Tracker():
 
         ''' config '''
         self.tracker_size = tracker_size
+        self.puck_position = puck_position
+        self.puck_proximity = puck_proximity
 
         self.verbose = verbose
         self.debugging = debug
@@ -213,7 +216,11 @@ class Tracker():
         sources.sort(key=lambda x: x['pos'][1])
         print "Ordered sources", sources
 
-        condition = sources[0]['pos'][1] < 300
+        condition = (
+            (sources[0]['pos'][0] - self.puck_position[0])**2 +
+            (sources[0]['pos'][1] - self.puck_position[1])**2
+        ) <= self.puck_proximity**2
+
         print "Condition: ", condition
 
         return condition
@@ -226,8 +233,11 @@ class Tracker():
 
         Tells if shoot is still being performed
         """
+        sources.sort(key=lambda x: x['pos'][1])
 
-        return self.starting_shoot(sources)
+        condition = sources[0]['pos'][1] > cwiid.IR_Y_MAX*0.2
+
+        return condition
 
     def outlier_removal(self, sources):
         return sources[:self.tracker_size]
