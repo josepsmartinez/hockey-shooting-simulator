@@ -42,7 +42,7 @@ def main():
 
     global wiimote
 
-    tracker = Tracker(POINTS_TO_BE_TRACKED)
+    tracker = Tracker(POINTS_TO_BE_TRACKED, (0,0))
 
     wiimote.mesg_callback = high_callback(lambda mesg, time: tracker.receive(mesg[1], time))
 
