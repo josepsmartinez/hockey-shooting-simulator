@@ -4,22 +4,23 @@ import sys
 from datetime import datetime
 
 import pygame
-from OpenGL.GLUT import *
+import OpenGL.GL as gl
 from OpenGL.GL import *
-from OpenGL.GLU import *
 from imgui.integrations.pygame import PygameRenderer
 import imgui
-from imgui_datascience import imgui_cv
 
 import cv2
 import numpy as np
 
 import cwiid
 
+from interface_utils import cv_image2texture, create_empty_texture
 from capture import get_wiimote, high_callback
 wiimote = None
 
 from tracker import Tracker
+
+texture = None
 
 __CONFIG = {
     'WINDOW_SIZE': tuple(map(lambda x: int(x*1.5), (800, 600))),
@@ -50,11 +51,12 @@ def connection_screen(tracker):
 def main_screen(tracker):
     global wiimote
     global GUI_STATE
+    global texture
 
     io = imgui.get_io()
 
     ''' IR data background '''
-    img = np.zeros((cwiid.IR_Y_MAX, cwiid.IR_X_MAX), np.uint8)
+    img = np.zeros((cwiid.IR_Y_MAX, cwiid.IR_X_MAX, 3), np.uint8)
     img += 255
 
     ''' draw detected sources '''
@@ -68,13 +70,15 @@ def main_screen(tracker):
     imgui.text("[%s] -> %s" % (tracker.state, tracker.current_sources))
     imgui.text("%s" % datetime.utcnow())
 
-    imgui_cv.image(img, height=int(0.6*io.display_size[1]), title="Detected IR sources")
+
+    texture = cv_image2texture(img, texture=texture)
+    imgui.image(texture[0], texture[1], texture[2])
+    texture = texture[0]
 
 
 def clear_screen():
-    glClearColor(0.0, 0.0, 0.0, 0.0)
+    glClearColor(0.1, 0.1, 0.1, 0.0)
     glClear(GL_COLOR_BUFFER_BIT)
-    #glEnd()
 
 def main_loop(tracker, renderer):
     global wiimote
@@ -82,15 +86,17 @@ def main_loop(tracker, renderer):
 
     io = imgui.get_io()
 
+    clear_screen()
+
 
     for event in pygame.event.get():
         """ these events could turn this loop function into an 'infinite' iterator
         => would get rid of <renderer> arg passing and while <tautology> """
         if event.type == pygame.QUIT:
+            glEnd()
             sys.exit()
 
         renderer.process_event(event)
-
 
     # start new frame context
     imgui.new_frame()
@@ -140,6 +146,8 @@ def main():
     io.display_size = size
 
     renderer = PygameRenderer()
+
+    texture = create_empty_texture(100, 100)
 
     while 1:
         main_loop(tracker, renderer)

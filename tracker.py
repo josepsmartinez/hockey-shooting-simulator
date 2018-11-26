@@ -1,3 +1,5 @@
+import cwiid
+
 class bcolors:
     HEADER = '\033[95m'
     OKBLUE = '\033[94m'
@@ -282,6 +284,8 @@ class Tracker():
             if src:
                 valid_src = True
                 self.logger.blue(str(src['pos']), end_line=False)
+
+                self.logger.blue(' ' + str(src['size']), end_line=False)
 
         if valid_src:
             print '' + bcolors.ENDC
