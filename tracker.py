@@ -1,3 +1,5 @@
+from math import cos, sin, acos
+
 import cwiid
 
 class bcolors:
@@ -39,6 +41,7 @@ class bcolors:
 class Tracker():
     def __init__(self, tracker_size,
             puck_position, puck_proximity=10,
+            camera_rotation=0,
             verbose=True, debug=False,
             calibration_patience=int(1e3)
         ):
@@ -54,6 +57,7 @@ class Tracker():
         self.tracker_size = tracker_size
         self.puck_position = puck_position
         self.puck_proximity = puck_proximity
+        self.camera_rotation = camera_rotation
 
         self.verbose = verbose
         self.debugging = debug
@@ -157,7 +161,7 @@ class Tracker():
             nasty flow control
         ]
         """
-        sources = list(filter(lambda x: x is not None, sources))
+        sources = self.sources_preprocess(sources)
         valid = self.valid_snapshot(sources)
         shooting = self.performing_shoot(sources) if valid else False
         touching_puck = self.starting_shoot(sources) if valid and not shooting else False
@@ -197,6 +201,29 @@ class Tracker():
                 print "[%s]: %s" % (self.state, self.current_snapshot)
 
     """ Internal Methods """
+    def sources_preprocess(self, sources):
+        """
+
+        """
+        sources = list(filter(lambda x: x is not None, sources))
+
+        def rotate_point(p,a,o):
+            p = (p[0]-o[0], p[1]-o[1])
+            a = (a%360) * acos(-1) / 180.0
+            return (
+                int(o[0] + cos(a) * p[0] - sin(a) * p[1]),
+                int(o[1] + cos(a) * p[1] + sin(a) * p[0]),
+            )
+
+        sources = list(map(lambda x: {
+            'pos': rotate_point(x['pos'],
+                    self.camera_rotation, (cwiid.IR_X_MAX//2, cwiid.IR_Y_MAX//2)
+                    ),
+            'size': x['size']
+        }, sources))
+
+        return sources
+
     def valid_snapshot(self, sources):
         """
         Tells if the tracker should attempt to
@@ -205,7 +232,6 @@ class Tracker():
         A false return will eventually uncalibrate the system!
         """
         return len(sources) >= self.tracker_size
-
 
     def starting_shoot(self, sources):
         """
