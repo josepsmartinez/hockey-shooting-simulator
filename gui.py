@@ -64,6 +64,10 @@ class hssGUI():
         self.state = 'connecting'
 
     def main_screen(self):
+        if imgui.button("Free Shooting"):
+            self.state = 'free_shoot'
+
+    def free_shoot_screen(self):
         io = imgui.get_io()
 
         ''' IR data background '''
@@ -86,6 +90,10 @@ class hssGUI():
         imgui.text("[%s] -> %s" % (self.tracker.state, self.tracker.current_sources))
         imgui.text("%s" % datetime.utcnow())
         imgui.text("Camera rotation: %s" % (self.cfg['CAMERA_ROTATION']))
+
+        ''' '''
+        if imgui.button("Back to main"):
+            self.state = 'main'
 
 
     """ INTERFACE """
@@ -117,7 +125,8 @@ class hssGUI():
         {
             'init': lambda: self.no_controller_screen(),
             'connection': lambda: self.connection_screen(),
-            'active': lambda: self.main_screen()
+            'main': lambda: self.main_screen(),
+            'free_shoot': lambda: self.free_shoot_screen()
         }[self.state]()
 
 
@@ -137,7 +146,7 @@ class hssGUI():
                 wiimote = get_wiimote() # hangs interface
             wiimote.mesg_callback = high_callback(lambda mesg, time: self.tracker.receive(mesg[1], time))
 
-            self.state = 'active'
+            self.state = 'main'
 
 def main():
     gui = hssGUI(__CONFIG)
