@@ -72,7 +72,7 @@ class Tracker():
 
         """  """
         self.ask_counter = 0
-        self.lose_counter = 0
+        self.lose_counter = None
 
     """ Actions """
     def _calibrate(self, sources):
@@ -83,6 +83,8 @@ class Tracker():
         Also updates current_snapshot since this is a system recovery
         """
         self.state = 'W'
+        self.lose_counter = 0
+
         self.calibration_snapshot = self.state_dict(sources)
         self.current_snapshot = self.calibration_snapshot
 
@@ -190,6 +192,8 @@ class Tracker():
         else:
             if valid:
                 """ tracking """
+                self.lose_counter = 0
+
                 self.current_snapshot = self._track_sources(sources)
                 sources = [v for (k,v) in self.current_snapshot.items()]
 
