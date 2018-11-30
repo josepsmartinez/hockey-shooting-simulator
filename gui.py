@@ -21,23 +21,27 @@ wiimote = None
 from tracker import Tracker
 
 __CONFIG = {
-    'WINDOW_SIZE': tuple(map(lambda x: int(x*1.5), (800, 600))),
+    'LEDS_ON_STICK': 2,
+    'TRIGGER_LED': 1, # (1 + N//2) - 1
+
+    'PUCK_POSITION': tuple(map(int, (cwiid.IR_X_MAX*0.5, cwiid.IR_Y_MAX*0.7))),
 
     'CAMERA_ROTATION': 180,
-    'LEDS_ON_STICK': 4,
-    'PUCK_POSITION': tuple(map(int, (cwiid.IR_X_MAX*0.5, cwiid.IR_Y_MAX*0.9)))
+
+    'WINDOW_SIZE': tuple(map(lambda x: int(x*1.5), (800, 600))),
 }
 
 class hssGUI():
     def __init__(self, cfg):
         self.state = 'init'
         self.cfg = cfg
-        self.tracker = Tracker(cfg['LEDS_ON_STICK'], cfg['PUCK_POSITION'],
+        self.tracker = Tracker(cfg['LEDS_ON_STICK'], cfg['TRIGGER_LED'],
+            cfg['PUCK_POSITION'],
             camera_rotation=cfg['CAMERA_ROTATION'])
 
         self.IR_texture = create_empty_texture(100, 100)
 
-        # imgui stuff
+        """ imgui stuff """
         pygame.init()
         pygame.display.set_mode(cfg['WINDOW_SIZE'], pygame.DOUBLEBUF | pygame.OPENGL)
 
