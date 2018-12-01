@@ -45,7 +45,7 @@ class Tracker():
         camera_rotation=0,
         verbose=True, debug=False,
         calibration_patience=int(1e3),
-        tracking_patience=10
+        tracking_patience=int(1e2)
         ):
         self.logger = bcolors()
 
@@ -55,11 +55,14 @@ class Tracker():
         self.calibration_snapshot = None
         self.current_snapshot = None
 
+        self.touching_point = None
+
         """ config """
         self.tracker_size = tracker_size
         self.trigger_index = trigger_index
 
         self.puck_position = puck_position
+        self.shooting_line = puck_position[1] - cwiid.IR_Y_MAX*0.1
         self.puck_proximity = puck_proximity
 
         self.camera_rotation = camera_rotation
@@ -72,7 +75,7 @@ class Tracker():
 
         """  """
         self.ask_counter = 0
-        self.lose_counter = None
+        self.lose_counter = 0
 
     """ Actions """
     def _calibrate(self, sources):
@@ -102,6 +105,7 @@ class Tracker():
 
         self.state = 'U'
         self.calibration_snapshot = None
+        self.touching_point = None
         self.ask_counter = 0
 
     def _track_sources(self, sources):
@@ -116,52 +120,51 @@ class Tracker():
             assert self.current_snapshot is not None
             assert len(sources) == self.tracker_size
 
-        try:
-            tracked = {}
+        tracked = {}
+        added_keys = []
 
-            for i, (k,v) in enumerate(self.current_snapshot.items()):
-                print(sources)
-                print(v)
-                """ builds a list of (point_id, distance) so
-                we can compute the match source to its closest point """
-                t = list(map(
-                    lambda s: (k,
-                        (s['pos'][0]-v['pos'][0])**2 +
-                        (s['pos'][1]-v['pos'][1])**2),
-                    sources
-                ))
+        for k, v in self.current_snapshot.items():
+            print(sources)
+            print(v)
+            """ builds a list of (point_id, distance) so
+            we can compute the match source to its closest point """
+            t = list(map(
+                lambda (i,s): (i,
+                    (s['pos'][0]-v['pos'][0])**2 +
+                    (s['pos'][1]-v['pos'][1])**2),
+                enumerate(sources)
+            ))
 
-                t = sorted(t, key = lambda x: x[1])
+            t = sorted(t, key = lambda x: x[1])
 
-                best = t[0][0]
+            best = t[0][0] # sources index
 
-                if tracked.has_key(best):
-                    """ stalemate: detected source is equidistant to multiple tracked ones """
-                    pass
-                else:
-                    if self.debugging:
-                        self.logger.blue("Matching point %d-th point %s to %s" % (i, str(s), best))
-                    tracked[best] = v
+            if best in added_keys:
+                """ stalemate: detected source is equidistant to multiple tracked ones """
+                self.logger.error("stalemate")
+                pass
+            else:
+                self.logger.blue("Matching point %d-th point %s to %s" % (k, str(v), str(sources[best])))
+                tracked[k] = sources[best]
+                added_keys.append(best)
 
-            if self.debugging:
-                """ the logic should never allow the assert below to fail """
-                try:
-                    assert len(tracked) == self.tracker_size
-                except:
-                    print "Sources: ", sources
-                    self.logger.error("Failed trying to match %d-th point (%s) to %s but \
-                        its value is %s" % (i, str(s), best, tracked[best]))
-                    exit()
+        if self.debugging:
+            """ the logic should never allow the assert below to fail """
+            try:
+                assert len(tracked) == self.tracker_size
+            except:
+                print "Sources: ", sources
+                self.logger.error("Failed trying to match %d-th point (%s) to %s but \
+                    its value is %s" % (i, str(s), best, tracked[best]))
+                exit()
 
+        print(self.logger.blue("Tracking %d points!!" % len(tracked.keys())))
+
+        if (len(tracked.keys()) < self.tracker_size):
+            return None
+        else:
             return tracked
 
-        except ValueError:
-            """ could not associate
-            since we have a valid detection, calibrate
-            """
-            self.logger.green("Recalibrating")
-            self._calibrate(sources)
-            return self.current_snapshot
 
     """ Interface """
     def receive(self, sources, time):
@@ -171,17 +174,20 @@ class Tracker():
         self.current_sources = sources
 
         valid = self.is_valid_snapshot(sources)
+        could_track = False
+
+
+        calibration_moment = self.is_calibration_snapshot(sources) if valid else False
+
+        if calibration_moment:
+            """ excludes trigger """
+            sources.sort(key=lambda x: x['pos'][1])
+            print("EXCLUDING TRIGGER SOURCES", sources)
+            sources = sources[:self.trigger_index] + sources[1+self.trigger_index:]
 
         if self.state == 'U':
-            calibration_moment = self.is_calibration_snapshot(sources) if valid else False
-
-            if calibration_moment:
+            if calibration_moment and valid:
                 self.logger.green("Calibrating")
-
-                """ excludes trigger """
-                sources.sort(key=lambda x: x['pos'][1])
-                sources = sources[:self.trigger_index] + sources[1+self.trigger_index:]
-
                 self._calibrate(sources)
 
             else:
@@ -191,14 +197,26 @@ class Tracker():
 
         else:
             if valid:
-                """ tracking """
+                """ attemps tracking """
+                tracking_results = self._track_sources(sources)
+                could_track = tracking_results is not None
+
+            if could_track:
                 self.lose_counter = 0
+                self.current_snapshot = tracking_results
 
-                self.current_snapshot = self._track_sources(sources)
-                sources = [v for (k,v) in self.current_snapshot.items()]
+                #sources = [v for (k,v) in self.current_snapshot.items()]
 
-                shooting = self.performing_shoot(sources) if valid else False
-                touching_puck = self.starting_shoot(sources) if valid else False
+                """ shooting stats
+                   note it only gets updated when tracking is sucessful!
+                   a delayed state is held on .current_snapshot until
+                    - detected sources are succesfully mapped to .current_snapshot, or
+                    - tracking patience is over
+                """
+                self.update_touching_point()
+
+                shooting = self.performing_shoot() if valid else False
+                touching_puck = self.starting_shoot() if valid else False
 
                 """ shoot detection """
                 if self.state == 'S' and not shooting:
@@ -206,6 +224,7 @@ class Tracker():
 
                 elif self.state == 'W' and touching_puck:
                     self._start_shoot()
+
             else:
                 """ tracking patience """
                 self.lose_counter += 1
@@ -213,17 +232,22 @@ class Tracker():
                 self.logger.error("%s : %s" % (self.lose_counter, str(sources)))
 
                 if self.lose_counter >= self.tracking_patience:
+                    if self.state == 'S':
+                        self._end_shoot()
                     self._lose_track()
                     self.current_snapshot = None
 
 
         """ stdout logging """
         if self.verbose:
-            if self.state != 'U':
-                self.log(sources, time)
+
+            #if self.state != 'U':
+                #self.log(sources, time)
 
             if self.current_snapshot:
-                print "[%s]: %s" % (self.state, self.current_snapshot)
+                print "current_snapshot [%s]: %s" % (self.state, self.current_snapshot)
+
+            #print "raw_sources: %s" % (self.current_sources)
 
     """ Internal Methods """
     def sources_preprocess(self, sources):
@@ -248,6 +272,13 @@ class Tracker():
         }, sources))
 
         return sources
+
+    def update_touching_point(self):
+        def next_point(p0, p1, s=1.0):
+            return p1
+
+        #self.touching_point = next_point(self.current_snapshot[0]['pos'], self.current_snapshot[1]['pos'], s=1.0)
+        self.touching_point = self.current_snapshot[1]['pos']
 
     def is_valid_snapshot(self, sources):
         """
@@ -283,37 +314,31 @@ class Tracker():
 
         return False
 
-    def starting_shoot(self, sources):
+    def starting_shoot(self):
         """
         Assumptions:
-        - source is a valid snapshot
 
         Tells if lowest stick point is touching virtual puck location
         """
-        #print "Raw sources", sources
-        sources.sort(key=lambda x: x['pos'][1])
-        print "Ordered sources", sources
 
         condition = (
-            (sources[0]['pos'][0] - self.puck_position[0])**2 +
-            (sources[0]['pos'][1] - self.puck_position[1])**2
-        ) <= self.puck_proximity**2
+            (self.touching_point[0] - self.puck_position[0])**2 +
+            (self.touching_point[1] - self.puck_position[1])**2
+        ) <= self.puck_proximity**2 if self.touching_point else False
 
-        print "Condition: ", condition
+        #print "Condition: ", condition
 
         return condition
 
-    def performing_shoot(self, sources):
+    def performing_shoot(self):
         """
         Assumptions:
-        - source is a valid snapshot
         - current tracker state is Shooting
 
         Tells if shoot is still being performed
         """
-        sources.sort(key=lambda x: x['pos'][1])
 
-        condition = sources[0]['pos'][1] > (self.puck_position[1] - cwiid.IR_Y_MAX*0.2)
+        condition = self.touching_point[1] > self.shooting_line if self.touching_point else False
 
         return condition
 
@@ -349,7 +374,7 @@ class Tracker():
 
         ]
         """
-        return { i:v for (i,v) in enumerate(sources) }
+        return { i:v for (i,v) in enumerate(sorted(sources, key=lambda x: x['pos'][1])) }
 
     """ I/O """
     def log(self, sources, time):
@@ -364,3 +389,19 @@ class Tracker():
 
         if valid_src:
             print '' + bcolors.ENDC
+
+    def disk_state_dump(self, fpointer, fix_output=None):
+        if self.current_snapshot is not None:
+            dump = list(map(lambda (k,x): x['pos'], self.current_snapshot.items()))
+
+            if fix_output and len(dump) < fix_output:
+                dump += (fix_output - len(dump)) * [(0,0)]
+
+            dump_str = ''.join(map(lambda x: "%s %s " % (x[0], x[1]), dump))
+            dump_str += '\n'
+
+            fpointer.write(dump_str)
+        else:
+            pass
+            #print("No snapshot available",
+            #    "Tracker state: %s" % self.state)
