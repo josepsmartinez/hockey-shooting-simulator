@@ -58,8 +58,7 @@ class bcolors:
 
 
 class Tracker():
-    def __init__(self, tracker_size,
-        trigger_index,
+    def __init__(self,
         puck_position, puck_proximity=10,
         stick_height=50,
         camera_rotation=0,
@@ -81,8 +80,8 @@ class Tracker():
         self.last_tracking_status = 'NACK'
 
         """ config """
-        self.tracker_size = tracker_size
-        self.trigger_index = trigger_index
+        self.tracker_size = 2
+        self.trigger_index = 0
 
         self.puck_position = puck_position
         self.shooting_line = puck_position[1] - cwiid.IR_Y_MAX*0.1

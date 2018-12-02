@@ -2,6 +2,8 @@ from __future__ import absolute_import
 
 import os
 import sys
+
+import copy
 from datetime import datetime
 
 import pygame
@@ -22,24 +24,23 @@ wiimote = None
 from tracker import Tracker
 
 __CONFIG = {
-    'LEDS_ON_STICK': 2,
-    'TRIGGER_LED': 0,
 
     'PUCK_POSITION': tuple(map(int, (cwiid.IR_X_MAX*0.5, cwiid.IR_Y_MAX*0.9))),
     'SHOOT_SENSITIVITY': 25,
+    'STICK_HEIGHT': 50,
 
     'CAMERA_ROTATION': 180,
 
     'WINDOW_SIZE': tuple(map(lambda x: int(x*1.75), (800, 600))),
+    'FONT_SCALE': 3.5
+
 }
 
 class hssGUI():
     def __init__(self, cfg):
         self.state = 'init'
         self.cfg = cfg
-        self.tracker = Tracker(cfg['LEDS_ON_STICK'], cfg['TRIGGER_LED'],
-            cfg['PUCK_POSITION'], puck_proximity=cfg['SHOOT_SENSITIVITY'],
-            camera_rotation=cfg['CAMERA_ROTATION'])
+        self.set_tracker()
 
         self.IR_texture = create_empty_texture(100, 100)
 
@@ -54,7 +55,7 @@ class hssGUI():
         self.renderer = PygameRenderer()
 
         """ disk output """
-        self.output_file = self.new_output_file()
+        self.output_file = None
 
 
         self.colors = {
@@ -73,8 +74,15 @@ class hssGUI():
 
         self.messages = {
             'calibration_not_ok' : "UNCALIBRATED STICK! PRESS THE BUTTON!",
-            'calibration_ok' : "READY, SHOOT!",
+            'waiting_shoot' : "READY, SHOOT!",
+            'shooting': "CROSS THE SHOOTING LINE"
         }
+
+    def set_tracker(self):
+        self.tracker = Tracker(self.cfg['PUCK_POSITION'],
+            puck_proximity=self.cfg['SHOOT_SENSITIVITY'],
+            stick_height=self.cfg['STICK_HEIGHT'],
+            camera_rotation=self.cfg['CAMERA_ROTATION'])
 
     def get_color(self, color, to_np_array=False):
         rgb_color = self.colors[color][::-1]
@@ -101,7 +109,7 @@ class hssGUI():
         glClear(GL_COLOR_BUFFER_BIT)
 
     """ SCREENS """
-    def shooting_subscreen(self):
+    def shooting_subscreen(self, extra_resize=1.0):
         ''' IR data background '''
         img = np.zeros((cwiid.IR_Y_MAX, cwiid.IR_X_MAX, 3), np.uint8)
 
@@ -134,27 +142,30 @@ class hssGUI():
             img = cv2.circle(img, self.tracker.puck_position, 10, self.get_color('puck'), -1)
 
         ''' updates texture '''
-        img = cv2.resize(img, (0,0), fx=1.5, fy=1.5)
+        img = cv2.resize(img, (0,0), fx=extra_resize*1.5, fy=extra_resize*1.5)
         self.IR_texture = cv_image2texture(img, texture=self.IR_texture[0])
         imgui.image(self.IR_texture[0], self.IR_texture[1], self.IR_texture[2])
 
+        ''' message / tip '''
+        if self.tracker.state in ('U'):
+            imgui.text(self.messages['calibration_not_ok'])
+        elif self.tracker.state in ('W'):
+            imgui.text(self.messages['waiting_shoot'])
+        elif self.tracker.state in ('S'):
+            imgui.text(self.messages['shooting'])
+
     def end_play_subscreen(self):
         ''' Button / action for interrupting a play '''
-        if imgui.button("Stop"):
+        if imgui.button("Stop",
+            width=self.cfg['WINDOW_SIZE'][0], height=self.cfg['WINDOW_SIZE'][1]/6):
             self.end_play()
 
     def play_results_screen(self):
         imgui.text("You performed %d shots!" % (self.tracker.shoot_counter))
 
-        if imgui.button("Back to main"):
+        if imgui.button("Back to main",
+            width=self.cfg['WINDOW_SIZE'][0], height=self.cfg['WINDOW_SIZE'][1]/4):
             self.state = 'main'
-
-    def no_controller_screen(self):
-        imgui.text("No wiimote detected")
-
-        if imgui.button("Connect",
-            width=self.cfg['WINDOW_SIZE'][0], height=self.cfg['WINDOW_SIZE'][1]/5):
-            self.state = 'connection'
 
     def connection_screen(self):
         imgui.text("---- CONNECTION INSTRUCTIONS ----")
@@ -162,23 +173,42 @@ class hssGUI():
         self.state = 'connecting'
 
     def main_screen(self):
-        self.tracker.reset_shoot_counter()
+        #self.tracker.reset_shoot_counter()
+        self.set_tracker()
 
-        if imgui.button("Free Shooting"):
-            self.state = 'free_shoot'
+        global wiimote
 
-            self.new_output_file()
-            self.tracker.set_logging_point(self.output_file)
-            self.output_file.write("Starting free shoot \n")
+        if wiimote is None:
+            imgui.text("No wiimote detected")
 
-        if imgui.button("Shoot 10"):
-            self.state = 'shoot_ten'
+            if imgui.button("Connect",
+                width=self.cfg['WINDOW_SIZE'][0], height=self.cfg['WINDOW_SIZE'][1]/4):
+                self.state = 'connection'
+        else:
+            if imgui.button("Free Shooting",
+                width=self.cfg['WINDOW_SIZE'][0], height=self.cfg['WINDOW_SIZE'][1]/5):
+                self.state = 'free_shoot'
+
+                self.new_output_file()
+                self.tracker.set_logging_point(self.output_file)
+                self.output_file.write("Starting free shoot \n")
+
+            if imgui.button("Shoot 10",
+                width=self.cfg['WINDOW_SIZE'][0], height=self.cfg['WINDOW_SIZE'][1]/5):
+                self.state = 'shoot_ten'
 
             self.new_output_file()
             self.tracker.set_logging_point(self.output_file)
             self.output_file.write("Starting shoot 10 \n")
 
-        if imgui.button("Quit"):
+        if imgui.button("Configuration",
+            width=self.cfg['WINDOW_SIZE'][0], height=self.cfg['WINDOW_SIZE'][1]/6):
+            self.state = 'edit'
+
+            self.stashed_config = copy.deepcopy(self.cfg)
+
+        if imgui.button("Quit",
+            width=self.cfg['WINDOW_SIZE'][0], height=self.cfg['WINDOW_SIZE'][1]/5):
             exit()
 
     def free_shoot_screen(self):
@@ -186,11 +216,6 @@ class hssGUI():
 
         self.shooting_subscreen()
 
-        ''' TEXT INFO '''
-        imgui.text("---- IR DATA (at least) ----")
-        imgui.text("[%s] -> %s" % (self.tracker.state, self.tracker.current_snapshot))
-        imgui.text("%s" % datetime.utcnow())
-        imgui.text("Camera rotation: %s" % (self.cfg['CAMERA_ROTATION']))
         imgui.text("Shoots: %d" % (self.tracker.shoot_counter))
 
         self.end_play_subscreen()
@@ -198,7 +223,6 @@ class hssGUI():
     def shoot_10_screen(self):
         self.shooting_subscreen()
 
-        ''' TEXT INFO '''
         imgui.text("Shoots: %d/%d" % (self.tracker.shoot_counter, 10))
 
         self.end_play_subscreen()
@@ -206,13 +230,63 @@ class hssGUI():
         if self.tracker.shoot_counter >= 10:
             self.end_play()
 
+    def edit_screen(self):
+        global wiimote
 
+        imgui.text("%s" % datetime.utcnow())
+        imgui.text("Current configuration")
+
+        imgui.text("(%s)" % (self.cfg['CAMERA_ROTATION']))
+        if imgui.begin_menu('Camera rotation', True):
+            c, _ = imgui.menu_item('0')
+            if c:
+                self.cfg['CAMERA_ROTATION'] = 0
+                self.set_tracker()
+
+            c, _ = imgui.menu_item('180')
+            if c:
+                self.cfg['CAMERA_ROTATION'] = 180
+                self.set_tracker()
+
+            imgui.end_menu()
+
+        c, v = imgui.slider_float('Shoot sensitivity',
+            self.cfg['SHOOT_SENSITIVITY'], 5.0, 500.0, '%.0f', 10.0)
+        if c:
+            self.cfg['SHOOT_SENSITIVITY'] = v
+            self.set_tracker()
+
+        c, v = imgui.slider_float('Stick head length',
+            self.cfg['STICK_HEIGHT'], 10.0, 100.0, '%.1f', 2.5)
+        if c:
+            self.cfg['STICK_HEIGHT'] = v
+            self.set_tracker()
+
+        if wiimote is not None:
+            self.shooting_subscreen(extra_resize=0.75)
+        else:
+            imgui.button("Connect wiimote")
+
+        if imgui.button("Confirm configuration",
+            width=self.cfg['WINDOW_SIZE'][0], height=self.cfg['WINDOW_SIZE'][1]/10):
+            self.stashed_config = None
+            self.state = 'main'
+
+        if imgui.button("Undo changes",
+            width=self.cfg['WINDOW_SIZE'][0], height=self.cfg['WINDOW_SIZE'][1]/10):
+            self.cfg = self.stashed_config
+
+        if imgui.button("Discard changes",
+            width=self.cfg['WINDOW_SIZE'][0], height=self.cfg['WINDOW_SIZE'][1]/10):
+            self.cfg = self.stashed_config
+            self.state = 'main'
 
     """ INTERFACE """
     def main_loop(self):
         global wiimote
 
         io = imgui.get_io()
+        imgui.get_io().font_global_scale = self.cfg['FONT_SCALE']
 
         self.clear()
 
@@ -235,9 +309,11 @@ class hssGUI():
 
         ''' draw screen based on interface state '''
         {
-            'init': lambda: self.no_controller_screen(),
+            #'connecting': lambda: self.connection_screen(),
+            'init': lambda: self.main_screen(),
             'connection': lambda: self.connection_screen(),
             'main': lambda: self.main_screen(),
+            'edit': lambda: self.edit_screen(),
             'play_results': lambda: self.play_results_screen(),
             'free_shoot': lambda: self.free_shoot_screen(),
             'shoot_ten': lambda: self.shoot_10_screen()
