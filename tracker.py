@@ -1,5 +1,8 @@
 from math import cos, sin, acos
 
+import copy
+from datetime import datetime
+
 import cwiid
 
 class bcolors:
@@ -10,6 +13,10 @@ class bcolors:
     FAIL = '\033[91m'
     ENDC = '\033[0m'
 
+    def __init__(self):
+        self.logfile = None
+        self.logtimestamp = None
+
     def disable(self):
         self.HEADER = ''
         self.OKBLUE = ''
@@ -18,14 +25,24 @@ class bcolors:
         self.FAIL = ''
         self.ENDC = ''
 
-    def _color_message(self, color, message, end_line=True):
+    def disk(self, message, end_line=True):
+        if self.logfile is not None:
+            self.logfile.write(str(message))
+
+            if end_line:
+                self.logfile.write('\n')
+
+    def _color_message(self, color, message, end_line=True, skip_disk=False):
+        if not skip_disk:
+            self.disk(message)
+
         if end_line:
             print color + str(message) + self.ENDC
         else:
             print color + str(message),
 
     def warning(self, message, **kwargs):
-        self._color_message(self.WARNING, message, **kwargs)
+        self._color_message(self.WARNING, message, skip_disk=True, **kwargs)
 
     def error(self, message, **kwargs):
         self._color_message(self.FAIL, message, **kwargs)
@@ -34,7 +51,7 @@ class bcolors:
         self._color_message(self.OKGREEN, message, **kwargs)
 
     def blue(self, message, **kwargs):
-        self._color_message(self.OKBLUE, message, **kwargs)
+        self._color_message(self.OKBLUE, message, skip_disk=True, **kwargs)
 
 
 
@@ -49,6 +66,7 @@ class Tracker():
         ):
         self.logger = bcolors()
 
+
         """ instantiate state represetation as invalid """
         self.state = 'U'
         self.current_sources = []
@@ -56,6 +74,8 @@ class Tracker():
         self.current_snapshot = None
 
         self.touching_point = None
+
+        self.last_tracking_status = 'NACK'
 
         """ config """
         self.tracker_size = tracker_size
@@ -91,7 +111,7 @@ class Tracker():
         self.lose_counter = 0
 
         self.calibration_snapshot = self.state_dict(sources)
-        self.current_snapshot = self.calibration_snapshot
+        self.current_snapshot = copy.deepcopy(self.calibration_snapshot)
 
     def _start_shoot(self):
         self.logger.green("Shoot started")
@@ -100,7 +120,8 @@ class Tracker():
     def _end_shoot(self):
         self.logger.green("Shoot ended")
         self.shoot_counter += 1
-        self.state = 'W'
+        #self.state = 'W'
+        self.state = 'U'
 
     def _lose_track(self):
         if self.verbose:
@@ -110,7 +131,6 @@ class Tracker():
         self.touching_point = None
 
         self.state = 'U'
-
         self.ask_counter = 0
 
     def _track_sources(self, sources):
@@ -146,7 +166,7 @@ class Tracker():
 
             if best in added_keys:
                 """ stalemate: detected source is equidistant to multiple tracked ones """
-                self.logger.error("stalemate")
+                self.logger.warning("stalemate")
                 pass
             else:
                 self.logger.blue("Matching point %d-th point %s to %s" % (k, str(v), str(sources[best])))
@@ -159,7 +179,7 @@ class Tracker():
                 assert len(tracked) == self.tracker_size
             except:
                 print "Sources: ", sources
-                self.logger.error("Failed trying to match %d-th point (%s) to %s but \
+                self.logger.warning("Failed trying to match %d-th point (%s) to %s but \
                     its value is %s" % (i, str(s), best, tracked[best]))
                 exit()
 
@@ -234,7 +254,7 @@ class Tracker():
                 """ tracking patience """
                 self.lose_counter += 1
 
-                self.logger.error("%s : %s" % (self.lose_counter, str(sources)))
+                self.logger.warning("%s : %s" % (self.lose_counter, str(sources)))
 
                 if self.lose_counter >= self.tracking_patience:
                     if self.state == 'S':
@@ -243,20 +263,28 @@ class Tracker():
                     self.current_snapshot = None
 
 
+        self.last_tracking_status = could_track
+
         """ stdout logging """
         if self.verbose:
 
-            #if self.state != 'U':
-                #self.log(sources, time)
+            if self.state != 'U':
+                self.log(sources, time)
 
             if self.current_snapshot:
                 print "current_snapshot [%s]: %s" % (self.state, self.current_snapshot)
 
             #print "raw_sources: %s" % (self.current_sources)
 
-    """ Internal Methods """
     def reset_shoot_counter(self):
         self.shoot_counter = 0
+
+    def set_logging_point(self, logging_point):
+        self.logger.logfile = logging_point
+        self.logger.logtimestamp = datetime.now()
+
+    """ Internal Methods """
+
 
     def sources_preprocess(self, sources):
         """
@@ -386,6 +414,7 @@ class Tracker():
 
     """ I/O """
     def log(self, sources, time):
+        """ STDOUT """
         valid_src = False
         self.logger.blue(self.state + ' ', end_line=False)
         for src in sources:
@@ -398,17 +427,34 @@ class Tracker():
         if valid_src:
             print '' + bcolors.ENDC
 
-    def disk_state_dump(self, fpointer, fix_output=None):
+        """ DISK """
+        self.disk_state_dump() # ends line
+
+    def disk_state_dump(self):
+        """
+        Renders current_snapshot (if any) as a 3D line in a text file
+        """
         if self.current_snapshot is not None:
-            dump = list(map(lambda (k,x): x['pos'], self.current_snapshot.items()))
+            # ESTIMATE Z-COORDINATE
+            calibration_distance = (self.calibration_snapshot[0]['pos'][0] - self.calibration_snapshot[1]['pos'][0]) ** 2
+            calibration_distance+= (self.calibration_snapshot[0]['pos'][1] - self.calibration_snapshot[1]['pos'][1]) ** 2
 
-            if fix_output and len(dump) < fix_output:
-                dump += (fix_output - len(dump)) * [(0,0)]
+            current_distance = (self.current_snapshot[0]['pos'][0] - self.current_snapshot[1]['pos'][0]) ** 2
+            current_distance+= (self.current_snapshot[0]['pos'][1] - self.current_snapshot[1]['pos'][1]) ** 2
 
-            dump_str = ''.join(map(lambda x: "%s %s " % (x[0], x[1]), dump))
-            dump_str += '\n'
+            z_estim = max(0, (calibration_distance - current_distance)) ** (0.5)
 
-            fpointer.write(dump_str)
+            '''
+            print("Z-COORDINATE", self.calibration_snapshot, self.current_snapshot)
+            print("Z distances %f %f %f" % (calibration_distance, current_distance, z_estim))
+            '''
+
+            dump = list(map(lambda (k,x): list(x['pos']) + [0 if k==0 else z_estim], self.current_snapshot.items()))
+
+            dump_str = ''.join(map(lambda x: "%d %d %d " % (x[0], x[1], x[2]), dump))
+            #dump_str += '\n'
+
+            self.logger.disk(dump_str)
         else:
             pass
             #print("No snapshot available",
