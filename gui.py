@@ -25,7 +25,7 @@ from tracker import Tracker
 
 __CONFIG = {
 
-    'PUCK_POSITION': tuple(map(int, (cwiid.IR_X_MAX*0.5, cwiid.IR_Y_MAX*0.9))),
+    'PUCK_POSITION': cwiid.IR_Y_MAX*0.9,
     'SHOOT_SENSITIVITY': 25,
     'STICK_HEIGHT': 50,
 
@@ -236,8 +236,7 @@ class hssGUI():
         imgui.text("%s" % datetime.utcnow())
         imgui.text("Current configuration")
 
-        imgui.text("(%s)" % (self.cfg['CAMERA_ROTATION']))
-        if imgui.begin_menu('Camera rotation', True):
+        if imgui.begin_menu("Camera rotation (%s)" % (self.cfg['CAMERA_ROTATION']), True):
             c, _ = imgui.menu_item('0')
             if c:
                 self.cfg['CAMERA_ROTATION'] = 0
@@ -251,21 +250,29 @@ class hssGUI():
             imgui.end_menu()
 
         c, v = imgui.slider_float('Shoot sensitivity',
-            self.cfg['SHOOT_SENSITIVITY'], 5.0, 500.0, '%.0f', 10.0)
+            self.cfg['SHOOT_SENSITIVITY'], 5.0, 250.0, '%.1f')
         if c:
             self.cfg['SHOOT_SENSITIVITY'] = v
             self.set_tracker()
 
         c, v = imgui.slider_float('Stick head length',
-            self.cfg['STICK_HEIGHT'], 10.0, 100.0, '%.1f', 2.5)
+            self.cfg['STICK_HEIGHT'], 10.0, 100.0, '%.1f')
         if c:
             self.cfg['STICK_HEIGHT'] = v
+            self.set_tracker()
+
+        c, v = imgui.slider_float('Puck height',
+            self.cfg['PUCK_POSITION']/float(cwiid.IR_Y_MAX), 0.6, 1.0, '%.2f')
+        if c:
+            self.cfg['PUCK_POSITION'] = v * cwiid.IR_Y_MAX
             self.set_tracker()
 
         if wiimote is not None:
             self.shooting_subscreen(extra_resize=0.75)
         else:
-            imgui.button("Connect wiimote")
+            if imgui.button("Connect wiimote",
+                width=self.cfg['WINDOW_SIZE'][0], height=self.cfg['WINDOW_SIZE'][1]/10):
+                self.state = 'connection'
 
         if imgui.button("Confirm configuration",
             width=self.cfg['WINDOW_SIZE'][0], height=self.cfg['WINDOW_SIZE'][1]/10):
@@ -342,7 +349,11 @@ def main():
     gui = hssGUI(__CONFIG)
 
     while 1:
-        gui.main_loop()
+        try:
+            gui.main_loop()
+        except KeyError as e:
+            print(e)
+
 
 if __name__ == '__main__':
     main()

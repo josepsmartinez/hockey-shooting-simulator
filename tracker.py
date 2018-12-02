@@ -59,7 +59,7 @@ class bcolors:
 
 class Tracker():
     def __init__(self,
-        puck_position, puck_proximity=10,
+        puck_height, puck_proximity=10,
         stick_height=50,
         camera_rotation=0,
         verbose=True, debug=False,
@@ -83,8 +83,8 @@ class Tracker():
         self.tracker_size = 2
         self.trigger_index = 0
 
-        self.puck_position = puck_position
-        self.shooting_line = puck_position[1] - cwiid.IR_Y_MAX*0.1
+        self.puck_position = tuple(map(int, (cwiid.IR_X_MAX*0.5, puck_height)))
+        self.shooting_line = self.puck_position[1] - cwiid.IR_Y_MAX*0.1
         self.puck_proximity = puck_proximity
         self.stick_height = stick_height
 
