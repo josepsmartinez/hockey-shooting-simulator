@@ -281,11 +281,14 @@ class hssGUI():
 
         if imgui.button("Undo changes",
             width=self.cfg['WINDOW_SIZE'][0], height=self.cfg['WINDOW_SIZE'][1]/10):
-            self.cfg = self.stashed_config
+            if self.stashed_config is not None:
+                self.cfg = copy.deepcopy(self.stashed_config)
 
         if imgui.button("Discard changes",
             width=self.cfg['WINDOW_SIZE'][0], height=self.cfg['WINDOW_SIZE'][1]/10):
-            self.cfg = self.stashed_config
+            if self.stashed_config is not None:
+                self.cfg = copy.deepcopy(self.stashed_config)
+
             self.state = 'main'
 
     """ INTERFACE """
