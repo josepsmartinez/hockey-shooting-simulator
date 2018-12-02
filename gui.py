@@ -93,7 +93,7 @@ class hssGUI():
 
         if self.output_file is not None:
             delta = datetime.now() - self.tracker.logger.logtimestamp
-            self.output_file.write("Ending play after %d\n" % (delta.total_seconds()))
+            self.output_file.write("Ending play after %s\n" % (delta.total_seconds()))
             self.output_file = None
 
     def clear(self):

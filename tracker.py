@@ -30,6 +30,8 @@ class bcolors:
             self.logfile.write(str(message))
 
             if end_line:
+                delta = datetime.now() - self.logtimestamp
+                self.logfile.write(" [%s]" % (delta.total_seconds()))
                 self.logfile.write('\n')
 
     def _color_message(self, color, message, end_line=True, skip_disk=False):
