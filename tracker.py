@@ -61,6 +61,7 @@ class Tracker():
     def __init__(self, tracker_size,
         trigger_index,
         puck_position, puck_proximity=10,
+        stick_height=50,
         camera_rotation=0,
         verbose=True, debug=False,
         calibration_patience=int(1e3),
@@ -86,6 +87,7 @@ class Tracker():
         self.puck_position = puck_position
         self.shooting_line = puck_position[1] - cwiid.IR_Y_MAX*0.1
         self.puck_proximity = puck_proximity
+        self.stick_height = stick_height
 
         self.camera_rotation = camera_rotation
 
@@ -122,17 +124,30 @@ class Tracker():
     def _end_shoot(self):
         self.logger.green("Shoot ended")
         self.shoot_counter += 1
+
         #self.state = 'W'
+
+        ''' uncalibrating so user controls shooting start better
+          resets
+        '''
         self.state = 'U'
+
+        self.calibration_snapshot = None
+        self.current_snapshot = None
+        self.touching_point = None
+
+        self.ask_counter = 0
 
     def _lose_track(self):
         if self.verbose:
             self.logger.error("Lost track!")
 
+        self.state = 'U'
+
         self.calibration_snapshot = None
+        self.current_snapshot = None
         self.touching_point = None
 
-        self.state = 'U'
         self.ask_counter = 0
 
     def _track_sources(self, sources):
@@ -276,8 +291,6 @@ class Tracker():
             if self.current_snapshot:
                 print "current_snapshot [%s]: %s" % (self.state, self.current_snapshot)
 
-            #print "raw_sources: %s" % (self.current_sources)
-
     def reset_shoot_counter(self):
         self.shoot_counter = 0
 
@@ -312,11 +325,24 @@ class Tracker():
         return sources
 
     def update_touching_point(self):
-        def next_point(p0, p1, s=1.0):
-            return p1
+        def next_point(p0, p1, s):
+            d = (
+                (p1[0] - p0[0]),
+                (p1[1] - p0[1])
+            )
 
-        #self.touching_point = next_point(self.current_snapshot[0]['pos'], self.current_snapshot[1]['pos'], s=1.0)
-        self.touching_point = self.current_snapshot[1]['pos']
+            d_mag = float((d[0]**2 + d[1]**2) ** (0.5))
+            d = (
+                d[0] * s / d_mag,
+                d[1] * s / d_mag
+            )
+
+            return tuple(map(int,(
+                p1[0] + d[0],
+                p1[1] + d[1]
+            )))
+
+        self.touching_point = next_point(self.current_snapshot[0]['pos'], self.current_snapshot[1]['pos'], self.stick_height)
 
     def is_valid_snapshot(self, sources):
         """
@@ -363,8 +389,6 @@ class Tracker():
             (self.touching_point[0] - self.puck_position[0])**2 +
             (self.touching_point[1] - self.puck_position[1])**2
         ) <= self.puck_proximity**2 if self.touching_point else False
-
-        #print "Condition: ", condition
 
         return condition
 
@@ -454,10 +478,5 @@ class Tracker():
             dump = list(map(lambda (k,x): list(x['pos']) + [0 if k==0 else z_estim], self.current_snapshot.items()))
 
             dump_str = ''.join(map(lambda x: "%d %d %d " % (x[0], x[1], x[2]), dump))
-            #dump_str += '\n'
 
             self.logger.disk(dump_str)
-        else:
-            pass
-            #print("No snapshot available",
-            #    "Tracker state: %s" % self.state)
