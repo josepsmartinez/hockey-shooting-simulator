@@ -77,6 +77,8 @@ class Tracker():
         self.ask_counter = 0
         self.lose_counter = 0
 
+        self.shoot_counter = 0
+
     """ Actions """
     def _calibrate(self, sources):
         """ Assumptions:
@@ -97,15 +99,18 @@ class Tracker():
 
     def _end_shoot(self):
         self.logger.green("Shoot ended")
+        self.shoot_counter += 1
         self.state = 'W'
 
     def _lose_track(self):
         if self.verbose:
             self.logger.error("Lost track!")
 
-        self.state = 'U'
         self.calibration_snapshot = None
         self.touching_point = None
+
+        self.state = 'U'
+
         self.ask_counter = 0
 
     def _track_sources(self, sources):
@@ -250,6 +255,9 @@ class Tracker():
             #print "raw_sources: %s" % (self.current_sources)
 
     """ Internal Methods """
+    def reset_shoot_counter(self):
+        self.shoot_counter = 0
+
     def sources_preprocess(self, sources):
         """
         Filter and map functions for raw sources
