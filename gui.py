@@ -1,5 +1,6 @@
 from __future__ import absolute_import
 
+import os
 import sys
 from datetime import datetime
 
@@ -53,13 +54,13 @@ class hssGUI():
         self.renderer = PygameRenderer()
 
         """ disk output """
-        self.output_file = open('output/test.out', 'w')
+        self.output_file = self.new_output_file()
 
 
         self.colors = {
             'background_not_ok': (255, 50, 50), # vermeho
-            'background_waiting': (100, 255, 100), # amarelo
-            'background_shooting': (50, 50, 255), # verde
+            'background_waiting': (100, 255, 255), # amarelo
+            'background_shooting': (50, 255, 50), # verde
 
             'puck': (200, 0, 200), # roxo
             'shooting_line': (250, 50, 50), # vermelho
@@ -82,32 +83,27 @@ class hssGUI():
         else:
             return rgb_color
 
+    def new_output_file(self):
+        present = datetime.now()
+        self.output_file = open(os.path.join('output', present.strftime("%y%m%d%H%M%s")) + '.test', 'w' )
+
+
+    def end_play(self):
+        self.state = 'play_results'
+
+        if self.output_file is not None:
+            delta = datetime.now() - self.tracker.logger.logtimestamp
+            self.output_file.write("Ending play after %d\n" % (delta.total_seconds()))
+            self.output_file = None
+
     def clear(self):
         glClearColor(0.1, 0.1, 0.1, 0.0)
         glClear(GL_COLOR_BUFFER_BIT)
 
     """ SCREENS """
-    def no_controller_screen(self):
-        imgui.text("No wiimote detected")
-
-        if imgui.button("Connect"):
-            self.state = 'connection'
-
-    def connection_screen(self):
-        imgui.text("---- CONNECTION INSTRUCTIONS ----")
-
-        self.state = 'connecting'
-
-    def main_screen(self):
-        if imgui.button("Free Shooting"):
-            self.state = 'free_shoot'
-
-    def free_shoot_screen(self):
-        io = imgui.get_io()
-
+    def shooting_subscreen(self):
         ''' IR data background '''
         img = np.zeros((cwiid.IR_Y_MAX, cwiid.IR_X_MAX, 3), np.uint8)
-
 
         ''' different background if calibrated '''
         img += self.get_color({
@@ -115,13 +111,7 @@ class hssGUI():
             'W': 'background_waiting',
             'S': 'background_shooting'
         }[self.tracker.state], to_np_array=True)
-        """        if self.tracker.state not in ('U'):
-            #img += np.array((150, 255, 150)).astype(np.uint8)
-            img += self.get_color('background_waiting', to_np_array=True)
-        else:
-            #img += np.array((100, 100, 255)).astype(np.uint8)
-            img += self.get_color('background_not_ok', to_np_array=True)
-        """
+
         ''' draw detected sources '''
         for source in self.tracker.current_sources:
             img = cv2.circle(img, source['pos'], 10, self.get_color('LED_normal'), -1)
@@ -143,26 +133,79 @@ class hssGUI():
         if self.tracker.state not in ('S'):
             img = cv2.circle(img, self.tracker.puck_position, 10, self.get_color('puck'), -1)
 
-
-
         ''' updates texture '''
         img = cv2.resize(img, (0,0), fx=1.5, fy=1.5)
         self.IR_texture = cv_image2texture(img, texture=self.IR_texture[0])
         imgui.image(self.IR_texture[0], self.IR_texture[1], self.IR_texture[2])
 
-        '''  '''
+    def end_play_subscreen(self):
+        ''' Button / action for interrupting a play '''
+        if imgui.button("Stop"):
+            self.end_play()
+
+    def play_results_screen(self):
+        imgui.text("You performed %d shots!" % (self.tracker.shoot_counter))
+
+        if imgui.button("Back to main"):
+            self.state = 'main'
+
+    def no_controller_screen(self):
+        imgui.text("No wiimote detected")
+
+        if imgui.button("Connect",
+            width=self.cfg['WINDOW_SIZE'][0], height=self.cfg['WINDOW_SIZE'][1]/5):
+            self.state = 'connection'
+
+    def connection_screen(self):
+        imgui.text("---- CONNECTION INSTRUCTIONS ----")
+
+        self.state = 'connecting'
+
+    def main_screen(self):
+        self.tracker.reset_shoot_counter()
+
+        if imgui.button("Free Shooting"):
+            self.state = 'free_shoot'
+
+            self.new_output_file()
+            self.tracker.set_logging_point(self.output_file)
+            self.output_file.write("Starting free shoot \n")
+
+        if imgui.button("Shoot 10"):
+            self.state = 'shoot_ten'
+
+            self.new_output_file()
+            self.tracker.set_logging_point(self.output_file)
+            self.output_file.write("Starting shoot 10 \n")
+
+        if imgui.button("Quit"):
+            exit()
+
+    def free_shoot_screen(self):
+        io = imgui.get_io()
+
+        self.shooting_subscreen()
+
+        ''' TEXT INFO '''
         imgui.text("---- IR DATA (at least) ----")
         imgui.text("[%s] -> %s" % (self.tracker.state, self.tracker.current_snapshot))
         imgui.text("%s" % datetime.utcnow())
         imgui.text("Camera rotation: %s" % (self.cfg['CAMERA_ROTATION']))
+        imgui.text("Shoots: %d" % (self.tracker.shoot_counter))
 
+        self.end_play_subscreen()
 
-        ''' '''
-        if imgui.button("Back to main"):
-            self.state = 'main'
+    def shoot_10_screen(self):
+        self.shooting_subscreen()
 
-        if self.tracker.state in ('W', 'S'):
-            self.tracker.disk_state_dump(self.output_file, fix_output=4)
+        ''' TEXT INFO '''
+        imgui.text("Shoots: %d/%d" % (self.tracker.shoot_counter, 10))
+
+        self.end_play_subscreen()
+
+        if self.tracker.shoot_counter >= 10:
+            self.end_play()
+
 
 
     """ INTERFACE """
@@ -195,7 +238,9 @@ class hssGUI():
             'init': lambda: self.no_controller_screen(),
             'connection': lambda: self.connection_screen(),
             'main': lambda: self.main_screen(),
-            'free_shoot': lambda: self.free_shoot_screen()
+            'play_results': lambda: self.play_results_screen(),
+            'free_shoot': lambda: self.free_shoot_screen(),
+            'shoot_ten': lambda: self.shoot_10_screen()
         }[self.state]()
 
 
@@ -215,8 +260,7 @@ class hssGUI():
                 wiimote = get_wiimote() # hangs interface
             wiimote.mesg_callback = high_callback(lambda mesg, time: self.tracker.receive(mesg[1], time))
 
-            #self.state = 'main'
-            self.state = 'free_shoot'
+            self.state = 'main'
 
 def main():
     gui = hssGUI(__CONFIG)
