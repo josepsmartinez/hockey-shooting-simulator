@@ -29,7 +29,7 @@ def high_callback(ir_callback):
                 ir_callback(mesg, time)
 
             elif mesg[0] ==  cwiid.MESG_ERROR:
-                print "Error message received"
+                print "Error message received from Wiimote callback!! Exiting"
                 global wiimote
                 wiimote.close()
                 exit(-1)
