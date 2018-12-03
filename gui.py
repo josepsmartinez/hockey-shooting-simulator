@@ -197,9 +197,9 @@ class hssGUI():
                 width=self.cfg['WINDOW_SIZE'][0], height=self.cfg['WINDOW_SIZE'][1]/5):
                 self.state = 'shoot_ten'
 
-            self.new_output_file()
-            self.tracker.set_logging_point(self.output_file)
-            self.output_file.write("Starting shoot 10 \n")
+                self.new_output_file()
+                self.tracker.set_logging_point(self.output_file)
+                self.output_file.write("Starting shoot 10 \n")
 
         if imgui.button("Configuration",
             width=self.cfg['WINDOW_SIZE'][0], height=self.cfg['WINDOW_SIZE'][1]/6):
