@@ -27,7 +27,7 @@ __CONFIG = {
 
     'PUCK_POSITION': cwiid.IR_Y_MAX*0.9,
     'SHOOT_SENSITIVITY': 25,
-    'STICK_HEIGHT': 50,
+    'STICK_HEIGHT': 150,
 
     'CAMERA_ROTATION': 180,
 
@@ -256,7 +256,7 @@ class hssGUI():
             self.set_tracker()
 
         c, v = imgui.slider_float('Stick head length',
-            self.cfg['STICK_HEIGHT'], 10.0, 100.0, '%.1f')
+            self.cfg['STICK_HEIGHT'], 10.0, 300.0, '%.1f')
         if c:
             self.cfg['STICK_HEIGHT'] = v
             self.set_tracker()
