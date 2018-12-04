@@ -1,14 +1,11 @@
-# hockey-shooting-simulator
-ayyyy vamo por IR num taco de hockey 
-
-
 # Dependencies
 
 - `cwiid` 
   - https://github.com/abstrakraft/cwiid
 
 I could not build and install every `make` rule, but did install `wmgui` application, `cwiid` python library (this project's dependency).
+To check if the lib is properly installed, open a Python interpreter in the desired environment and try `import cwiid`.
 
-- `imgui` + `pygame` + `imgui_datascience`
+- `imgui` + `pygame`
   - https://pyimgui.readthedocs.io/en/latest/index.html
-  - https://imgui-datascience.readthedocs.io/en/latest/
+
